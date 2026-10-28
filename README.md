@@ -81,3 +81,10 @@ Le schéma affiche une prise d'air au-dessus de l'unité, la vanne (ouverte, fer
 - Freecooling désactivé : le schéma ne montre que la vanne et son état (pas de conduit d'air extérieur), le bouton « Désactivé » reste seul, sans bulle d'explication, et seul le gainable est affiché.
 - Freecooling activé : conduit d'air extérieur animé, bulle d'état avec l'écart extérieur / intérieur, et un second bloc pour le `climate` freecooling (température, consigne − / +, modes).
 - Les alertes (fins de course incohérents, vanne bloquée) restent visibles même si le freecooling est désactivé.
+
+**Groupe extérieur (v1.5.0)** : une pompe à chaleur apparaît sous l'unité, reliée par deux tuyaux animés, quand la puissance dépasse un seuil.
+
+```yaml
+hp_entity: sensor.esp_tableau_gainable_puissance
+hp_threshold: 80   # watts (80 par défaut)
+```

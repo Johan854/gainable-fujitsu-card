@@ -6,7 +6,7 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.4.1";
+const CARD_VERSION = "1.5.0";
 
 /* === NUANCE COMMUNE v2 (cartes Johan854) ===
  * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
@@ -43,6 +43,7 @@ const DEFAULTS = {
   name: "",
   theme: "auto", nuance: "theme", intensite: 1, // auto | light | dark
   info_entities: [],
+  hp_entity: "", hp_threshold: 80,
   freecooling_entity: "", freecooling_target_entity: "", valve_open_entity: "", valve_closed_entity: "", outdoor_entity: "", outdoor_name: "Extérieur", valve_timeout: 90,
   return_entity: "",
   return_name: "Reprise",
@@ -125,7 +126,7 @@ function unitSvg(running, uid, data) {
   }).join("");
   const fc = data.fc ? fcSvg(data.fc) : "";
   return `
-<svg viewBox="0 ${data.fc && data.fc.active ? -24 : 0} 360 ${data.fc && data.fc.active ? 174 : 150}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
+<svg viewBox="0 ${data.fc && data.fc.active ? -24 : 0} 360 ${(data.fc && data.fc.active ? 174 : 150) + (data.hp ? 50 : 0)}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
   <defs><radialGradient id="hv-g-${uid}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--hv-mode)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--hv-mode)" stop-opacity="0"/></radialGradient></defs>
   ${running ? `<ellipse cx="150" cy="74" rx="75" ry="55" fill="url(#hv-g-${uid})"/>` : ""}
   ${ducts}
@@ -144,6 +145,19 @@ function unitSvg(running, uid, data) {
   <g class="${running ? "fan" : ""}" style="transform-origin:143px 74px"><path d="M143 74 L143 61 A13 13 0 0 1 155 69Z M143 74 L156 74 A13 13 0 0 1 149 86Z M143 74 L137 86 A13 13 0 0 1 130 74Z M143 74 L130 74 A13 13 0 0 1 137 62Z" fill="var(--hv-mode)"/></g>
   <circle cx="143" cy="74" r="3" fill="var(--hv-box)"/>
   ${fc}
+  ${data.hp ? `<!-- groupe extérieur (pompe à chaleur) : affiché quand la puissance dépasse le seuil -->
+  <path d="M135 98 V122 M151 98 V122" fill="none" stroke="var(--hv-pipe)" stroke-width="5" stroke-linecap="round"/>
+  <path class="flow" d="M135 98 V122 M151 122 V98" fill="none" stroke="var(--hv-mode)" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
+  <g transform="translate(98 120) scale(.75)">
+    <rect x="4" y="6" width="112" height="66" rx="8" fill="var(--hv-box)" stroke="var(--hv-mode)" stroke-width="1.8"/>
+    <g stroke="var(--hv-muted)" stroke-width="1.2" opacity=".7"><line x1="94" y1="16" x2="108" y2="16"/><line x1="94" y1="24" x2="108" y2="24"/><line x1="94" y1="32" x2="108" y2="32"/><line x1="94" y1="40" x2="108" y2="40"/><line x1="94" y1="48" x2="108" y2="48"/><line x1="94" y1="56" x2="108" y2="56"/><line x1="94" y1="64" x2="108" y2="64"/></g>
+    <circle cx="48" cy="39" r="27" fill="none" stroke="var(--hv-muted)" stroke-width="1.4"/>
+    <circle cx="48" cy="39" r="21" fill="none" stroke="var(--hv-muted)" stroke-width=".8" opacity=".6"/>
+    <g class="fan" style="transform-origin:48px 39px"><path d="M48 39 C44 28 46 20 52 18 C56 24 54 33 48 39Z M48 39 C59 35 67 37 69 43 C63 47 54 45 48 39Z M48 39 C52 50 50 58 44 60 C40 54 42 45 48 39Z M48 39 C37 43 29 41 27 35 C33 31 42 33 48 39Z" fill="var(--hv-mode)" opacity=".9"/></g>
+    <circle cx="48" cy="39" r="4" fill="var(--hv-muted)"/>
+    <rect x="14" y="72" width="14" height="6" rx="2" fill="var(--hv-muted)" opacity=".6"/><rect x="92" y="72" width="14" height="6" rx="2" fill="var(--hv-muted)" opacity=".6"/>
+  </g>
+  <text x="143" y="${(data.fc && data.fc.active ? 0 : 0) + 188}" text-anchor="middle" class="dn">${esc(data.hp.label)}</text>` : ""}
 </svg>`;
 }
 
@@ -178,7 +192,7 @@ class DuctedHvacCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-    const ids = [this._config.entity, this._config.return_entity, this._config.freecooling_entity, this._config.freecooling_target_entity, this._config.valve_open_entity, this._config.valve_closed_entity, this._config.outdoor_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
+    const ids = [this._config.entity, this._config.return_entity, this._config.hp_entity, this._config.freecooling_entity, this._config.freecooling_target_entity, this._config.valve_open_entity, this._config.valve_closed_entity, this._config.outdoor_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
     const sig = ids.map((e) => {
       const s = hass.states[e];
       return s ? s.state + "|" + JSON.stringify([s.attributes.hvac_action, s.attributes.temperature, s.attributes.current_temperature, s.attributes.fan_mode, s.attributes.preset_mode, s.attributes.humidity]) : "x";
@@ -345,6 +359,11 @@ class DuctedHvacCard extends HTMLElement {
         ${btn}</div>`;
     }
     svgData.fc = fc;
+    /* groupe extérieur : visible au-dessus du seuil de puissance */
+    const hpS = c.hp_entity ? h.states[c.hp_entity] : null;
+    if (hpS && !bad(hpS) && isNum(hpS.state) && Number(hpS.state) > (Number(c.hp_threshold) || 80)) {
+      svgData.hp = { label: "Groupe extérieur · " + this._fmt(hpS.state, 0) + " " + (hpS.attributes.unit_of_measurement || "W") };
+    }
 
     /* second climate : visible seulement quand le freecooling est activé */
     let fcBlock = "";
@@ -508,6 +527,7 @@ const LABELS = { ...GV_LABELS,
   freecooling_entity: "Freecooling : interrupteur (input_boolean, facultatif)", valve_open_entity: "Freecooling : vanne ouverte (fin de course)", valve_closed_entity: "Freecooling : vanne fermée (fin de course)",
   outdoor_entity: "Freecooling : température de l'air extérieur", outdoor_name: "Freecooling : nom de la sonde", valve_timeout: "Freecooling : délai avant alerte vanne bloquée (s)",
   freecooling_target_entity: "Freecooling : consigne réglable (climate, input_number ou number)",
+  hp_entity: "Groupe extérieur : capteur de puissance", hp_threshold: "Groupe extérieur : afficher au-dessus de (W)",
   entity: "Climatisation (entité climate)", name: "Nom (facultatif)", info_entities: "Capteurs à afficher (soufflage, reprise, humidité...)",
   temp_step: "Pas de la consigne (0 = automatique)", theme: "Thème", show_controls: "Afficher les commandes",
   return_entity: "Caisson de reprise : température à afficher", return_name: "Caisson de reprise : nom",
@@ -545,6 +565,7 @@ class DuctedHvacCardEditor extends HTMLElement {
       { type: "grid", name: "", schema: [{ name: "return_name", selector: { text: {} } }] },
       ...[1, 2, 3, 4, 5].map((n) => ({ type: "grid", name: "", schema: [
         { name: "duct_" + n, selector: { entity: { domain: "sensor" } } }, { name: "duct_" + n + "_name", selector: { text: {} } } ] })),
+      { type: "grid", name: "", schema: [{ name: "hp_entity", selector: { entity: { domain: "sensor", device_class: "power" } } }, { name: "hp_threshold", selector: { number: { min: 0, max: 5000, mode: "box" } } }] },
       { type: "expandable", name: "", title: "Freecooling (vanne d'air extérieur)", schema: [
         { name: "freecooling_entity", selector: { entity: { domain: ["input_boolean", "switch"] } } },
         { name: "freecooling_target_entity", selector: { entity: { domain: ["climate", "input_number", "number", "sensor"] } } },
