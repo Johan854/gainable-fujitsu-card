@@ -6,7 +6,7 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.4.0";
+const CARD_VERSION = "1.4.1";
 
 /* === NUANCE COMMUNE v2 (cartes Johan854) ===
  * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
@@ -102,7 +102,7 @@ function fcSvg(f) {
     : f.state === "closed" ? `<line x1="117" y1="28" x2="133" y2="28" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>`
     : `<line class="vmove" x1="125" y1="20" x2="125" y2="36" stroke="${col}" stroke-width="2.6" stroke-linecap="round" style="transform-origin:125px 28px"/>`;
   return `
-  ${act ? `<path d="M125 -12 V50" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>` : ""}
+  ${act ? `<path d="M125 -12 V50" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>` : `<path d="M125 34 V52" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>`}
   ${act && f.state === "open" ? `<path class="flow" d="M125 -12 V50" fill="none" stroke="var(--hv-out)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3 7"/>` : ""}
   ${act ? `<path d="M112 -16 H138 M114 -20 H136" stroke="var(--hv-muted)" stroke-width="1.6" stroke-linecap="round"/>` : ""}
   <circle cx="125" cy="28" r="9" fill="var(--hv-box)" stroke="${col}" stroke-width="1.6"/>${blade}
@@ -339,10 +339,10 @@ class DuctedHvacCard extends HTMLElement {
       const msg = vs === "open" ? "Freecooling actif : l'air extérieur est aspiré" : vs === "closed" ? "Vanne fermée : air intérieur recyclé" : vs === "moving" ? "La vanne se déplace…" : vs === "fault" ? "Alerte : les deux fins de course sont actifs" : vs === "stuck" ? "Alerte : la vanne ne rejoint aucune fin de course" : "Position de la vanne inconnue";
       const fcOn = !!(fe && fe.state === "on"), alarm = vs === "fault" || vs === "stuck";
       fc.active = fcOn || vs === "open" || vs === "moving" || alarm;
-      const btn = fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Activé" : "Désactivé"}</button>` : "";
+      const btn = fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Freecooling activé" : "Freecooling désactivé"}</button>` : "";
       if (!fcOn && !alarm) fcStrip = btn ? `<div class="fcs min">${btn}</div>` : "";
       else fcStrip = `<div class="fcs ${vs === "fault" || vs === "stuck" ? "bad" : vs === "open" ? "ok" : vs === "moving" ? "warn" : ""}"><div class="fct"><b>${esc(msg)}</b>${delta ? `<span>${esc(delta)}</span>` : ""}</div>
-        ${fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Activé" : "Désactivé"}</button>` : ""}</div>`;
+        ${btn}</div>`;
     }
     svgData.fc = fc;
 
