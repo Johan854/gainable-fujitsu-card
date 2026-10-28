@@ -6,7 +6,7 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
 
 /* === NUANCE COMMUNE v2 (cartes Johan854) ===
  * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
@@ -43,6 +43,7 @@ const DEFAULTS = {
   name: "",
   theme: "auto", nuance: "theme", intensite: 1, // auto | light | dark
   info_entities: [],
+  freecooling_entity: "", valve_open_entity: "", valve_closed_entity: "", outdoor_entity: "", outdoor_name: "Extérieur", valve_timeout: 90,
   return_entity: "",
   return_name: "Reprise",
   duct_1: "", duct_2: "", duct_3: "", duct_4: "", duct_5: "",
@@ -93,6 +94,22 @@ function modeKey(st) {
 
 let UID = 0;
 
+/* Prise d'air extérieur + vanne motorisée sur la reprise (au-dessus de l'unité) */
+function fcSvg(f) {
+  const col = f.state === "open" ? "var(--hv-out)" : f.state === "closed" ? "var(--hv-muted)" : f.state === "fault" ? "var(--hv-bad)" : f.state === "moving" ? "var(--hv-warn)" : "var(--hv-muted)";
+  const blade = f.state === "open" ? `<line x1="125" y1="20" x2="125" y2="36" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>`
+    : f.state === "closed" ? `<line x1="117" y1="28" x2="133" y2="28" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>`
+    : `<line class="vmove" x1="125" y1="20" x2="125" y2="36" stroke="${col}" stroke-width="2.6" stroke-linecap="round" style="transform-origin:125px 28px"/>`;
+  return `
+  <path d="M125 -12 V50" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>
+  ${f.state === "open" ? `<path class="flow" d="M125 -12 V50" fill="none" stroke="var(--hv-out)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3 7"/>` : ""}
+  <path d="M112 -16 H138 M114 -20 H136" stroke="var(--hv-muted)" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="125" cy="28" r="9" fill="var(--hv-box)" stroke="${col}" stroke-width="1.6"/>${blade}
+  <text x="146" y="-6" class="dv" style="fill:${f.state === "open" ? "var(--hv-out)" : "var(--hv-text)"}">${esc(f.value)}</text>
+  <text x="146" y="3" class="dn">${esc(f.name)}</text>
+  <text x="146" y="31" class="dn" style="fill:${col}">${esc(f.label)}</text>`;
+}
+
 function unitSvg(running, uid, data) {
   const ys = [22, 48, 74, 100, 126];
   const cut = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
@@ -105,8 +122,9 @@ function unitSvg(running, uid, data) {
     <rect x="290" y="${y - 8}" width="8" height="16" rx="2" fill="var(--hv-pipe)" stroke="var(--hv-mode)" stroke-width="1.2"/>
     ${d ? `<text x="304" y="${y - 1}" class="dv">${esc(d.value)}</text><text x="304" y="${y + 8}" class="dn">${esc(cut(d.name, 8))}</text>` : ""}`;
   }).join("");
+  const fc = data.fc ? fcSvg(data.fc) : "";
   return `
-<svg viewBox="0 0 360 150" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
+<svg viewBox="0 ${data.fc ? -24 : 0} 360 ${data.fc ? 174 : 150}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
   <defs><radialGradient id="hv-g-${uid}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--hv-mode)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--hv-mode)" stop-opacity="0"/></radialGradient></defs>
   ${running ? `<ellipse cx="150" cy="74" rx="75" ry="55" fill="url(#hv-g-${uid})"/>` : ""}
   ${ducts}
@@ -124,6 +142,7 @@ function unitSvg(running, uid, data) {
   <circle cx="143" cy="74" r="15" fill="none" stroke="var(--hv-pipe)" stroke-width="1.2"/>
   <g class="${running ? "fan" : ""}" style="transform-origin:143px 74px"><path d="M143 74 L143 61 A13 13 0 0 1 155 69Z M143 74 L156 74 A13 13 0 0 1 149 86Z M143 74 L137 86 A13 13 0 0 1 130 74Z M143 74 L130 74 A13 13 0 0 1 137 62Z" fill="var(--hv-mode)"/></g>
   <circle cx="143" cy="74" r="3" fill="var(--hv-box)"/>
+  ${fc}
 </svg>`;
 }
 
@@ -158,7 +177,7 @@ class DuctedHvacCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-    const ids = [this._config.entity, this._config.return_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
+    const ids = [this._config.entity, this._config.return_entity, this._config.freecooling_entity, this._config.valve_open_entity, this._config.valve_closed_entity, this._config.outdoor_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
     const sig = ids.map((e) => {
       const s = hass.states[e];
       return s ? s.state + "|" + JSON.stringify([s.attributes.hvac_action, s.attributes.temperature, s.attributes.current_temperature, s.attributes.fan_mode, s.attributes.preset_mode, s.attributes.humidity]) : "x";
@@ -256,6 +275,41 @@ class DuctedHvacCard extends HTMLElement {
     const retS = c.return_entity ? h.states[c.return_entity] : null;
     const svgData = { ducts, returnVal: c.return_entity ? sval(c.return_entity) : cur + (cur === "—" ? "" : unit), returnName: c.return_name || (retS && retS.attributes.friendly_name) || "Reprise" };
 
+    /* freecooling : état de la vanne, température extérieure, écart avec l'intérieur */
+    let fc = null, fcStrip = "";
+    if (c.valve_open_entity || c.valve_closed_entity || c.outdoor_entity || c.freecooling_entity) {
+      const on = (e) => { const s2 = e && h.states[e]; return s2 && s2.state === "on"; };
+      const known = (e) => { const s2 = e && h.states[e]; return s2 && !bad(s2); };
+      const oEnt = c.valve_open_entity, cEnt = c.valve_closed_entity;
+      let vs = "unknown";
+      if (known(oEnt) || known(cEnt)) {
+        if (on(oEnt) && on(cEnt)) vs = "fault";
+        else if (on(oEnt)) vs = "open";
+        else if (on(cEnt)) vs = "closed";
+        else if (oEnt && cEnt) vs = "moving";
+        else vs = oEnt ? "closed" : "open"; // un seul capteur : l'absence de signal = position opposée
+      }
+      let since = 0;
+      if (vs === "moving") {
+        since = Math.max(...[oEnt, cEnt].map((e) => { const s2 = h.states[e]; return s2 ? Date.parse(s2.last_changed) || 0 : 0; }));
+        const wait = (Number(c.valve_timeout) || 90) * 1000 - (Date.now() - since);
+        if (wait <= 0) vs = "stuck";
+        else { clearTimeout(this._mvTimer); this._mvTimer = setTimeout(() => { this._sig = ""; this._render(); }, wait + 200); }
+      }
+      const label = { open: "Vanne ouverte", closed: "Vanne fermée", moving: "En mouvement…", fault: "Capteurs incohérents", stuck: "Vanne bloquée ?", unknown: "Vanne inconnue" }[vs];
+      const outS = c.outdoor_entity ? h.states[c.outdoor_entity] : null;
+      const outV = outS && !bad(outS) && isNum(outS.state) ? Number(outS.state) : null;
+      fc = { state: vs === "stuck" ? "fault" : vs, label, name: c.outdoor_name || "Extérieur", value: outV !== null ? this._fmt(outV) + (outS.attributes.unit_of_measurement || unit) : "—" };
+      const inV = isNum(a.current_temperature) ? Number(a.current_temperature) : null;
+      let delta = "";
+      if (outV !== null && inV !== null) { const d = outV - inV; delta = `Extérieur ${d <= 0 ? "" : "+"}${this._fmt(d)}${unit} par rapport à l'intérieur${d < -0.5 ? " : air plus frais" : d > 0.5 ? " : air plus chaud" : ""}`; }
+      const fe = c.freecooling_entity ? h.states[c.freecooling_entity] : null;
+      const msg = vs === "open" ? "Freecooling actif : l'air extérieur est aspiré" : vs === "closed" ? "Vanne fermée : air intérieur recyclé" : vs === "moving" ? "La vanne se déplace…" : vs === "fault" ? "Alerte : les deux fins de course sont actifs" : vs === "stuck" ? "Alerte : la vanne ne rejoint aucune fin de course" : "Position de la vanne inconnue";
+      fcStrip = `<div class="fcs ${vs === "fault" || vs === "stuck" ? "bad" : vs === "open" ? "ok" : vs === "moving" ? "warn" : ""}"><div class="fct"><b>${esc(msg)}</b>${delta ? `<span>${esc(delta)}</span>` : ""}</div>
+        ${fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Activé" : "Désactivé"}</button>` : ""}</div>`;
+    }
+    svgData.fc = fc;
+
     const modes = (a.hvac_modes || []).filter((m) => MODES[m] || m);
     const modeBtns = c.show_modes && !unknown ? `<div class="modes">${modes.map((m) => {
       const mm = MODES[m] || { label: tr({}, m), icon: "mdi:thermostat" };
@@ -287,12 +341,14 @@ class DuctedHvacCard extends HTMLElement {
           --hv-border:rgba(255,255,255,.14); --hv-shadow:0 .6em 2em rgba(0,0,0,.35);
           --hv-glass:rgba(255,255,255,.07); --hv-glass-b:rgba(255,255,255,.13); --hv-fill:rgba(255,255,255,.09); --hv-fill-b:rgba(255,255,255,.16);
           --hv-heat:#ff8a3d; --hv-cool:#4fc3f7; --hv-auto:#9ad37f; --hv-dry:#7bd4c8; --hv-fan:#b9a7ff; --hv-off:#8a8f9c;
+          --hv-out:#5fd3a4; --hv-warn:#ffc04d; --hv-bad:#ff6b6b;
         }
         ha-card.light {
           --hv-text:#1c2030; --hv-muted:#5d6477; --hv-bg:var(--g-bg-x,linear-gradient(160deg,#f8f9fd 0%,#eef1f8 55%,#f8eff0 100%));
           --hv-border:rgba(20,24,40,.12); --hv-shadow:0 .4em 1.4em rgba(20,24,40,.12);
           --hv-glass:rgba(255,255,255,.7); --hv-glass-b:rgba(20,24,40,.1); --hv-fill:rgba(20,24,40,.06); --hv-fill-b:rgba(20,24,40,.14);
           --hv-heat:#e06a14; --hv-cool:#0f8fc4; --hv-auto:#2e9d4a; --hv-dry:#18978a; --hv-fan:#6c52d9; --hv-off:#8a8f9c;
+          --hv-out:#14966a; --hv-warn:#c77a14; --hv-bad:#d23a3a;
         }
         ha-card { display:flex; flex-direction:column; gap:12px; padding:16px; overflow:hidden; color:var(--hv-text);
           border-radius:24px; border:1px solid var(--hv-border); background:var(--hv-bg); box-shadow:var(--hv-shadow); }
@@ -345,13 +401,20 @@ class DuctedHvacCard extends HTMLElement {
         .flow { animation:hv-dash 1s linear infinite; } @keyframes hv-dash { to { stroke-dashoffset:-20; } }
         .led { animation:hv-led 1.6s ease-in-out infinite; } @keyframes hv-led { 50% { opacity:.35; } }
         .air { display:none; }
-        @media (prefers-reduced-motion: reduce) { .fan, .flow, .led { animation:none; } }
+        .fcs { display:flex; align-items:center; justify-content:space-between; gap:.6em; flex-wrap:wrap; padding:.6em .8em; border-radius:1em; background:var(--hv-fill); border:1px solid var(--hv-fill-b); font-size:.8em; }
+        .fct { display:flex; flex-direction:column; gap:.15em; min-width:0; } .fct span { color:var(--hv-muted); font-size:.92em; }
+        .fcs.ok { border-color:var(--hv-out); } .fcs.warn { border-color:var(--hv-warn); } .fcs.bad { border-color:var(--hv-bad); background:color-mix(in srgb, var(--hv-bad) 14%, transparent); }
+        .fcb { display:flex; align-items:center; gap:.4em; padding:.4em .85em; border-radius:2em; font-weight:600; background:var(--hv-fill); border:1px solid var(--hv-fill-b); color:var(--hv-muted); }
+        .fcb.on { color:var(--hv-out); border-color:var(--hv-out); }
+        .vmove { animation:hv-vm 1.2s ease-in-out infinite; } @keyframes hv-vm { 0%,100% { transform:rotate(0); } 50% { transform:rotate(60deg); } }
+        @media (prefers-reduced-motion: reduce) { .fan, .flow, .led, .vmove { animation:none; } }
         
       </style>
       <ha-card class="${dark ? "dark" : "light"}" style="${gvStyle(this._config, dark)}">
         <div class="head"><b>${esc(name)}</b><span class="state ${key === "unavailable" ? "off" : key}">${esc(stateLabel)}</span></div>
         <div class="panel m-${key}">
           <div class="art">${unitSvg(running, this._uid, svgData)}</div>
+          ${fcStrip}
           <div class="read">
             <div><div class="lbl">Température</div><button class="big" data-more="${esc(c.entity)}">${esc(cur)}<small>${esc(unit)}</small></button></div>
             ${hasTarget ? `<div><div class="lbl">Consigne</div><div class="set">
@@ -369,6 +432,7 @@ class DuctedHvacCard extends HTMLElement {
 
     const root = this.shadowRoot;
     root.querySelectorAll("[data-more]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.more)));
+    root.querySelectorAll("[data-fc-toggle]").forEach((el) => el.addEventListener("click", () => this._hass.callService("homeassistant", "toggle", { entity_id: el.dataset.fcToggle })));
     root.querySelectorAll("[data-action]").forEach((el) => el.addEventListener("click", () => this._adjust(el.dataset.action === "up" ? 1 : -1)));
     root.querySelectorAll("[data-mode]").forEach((el) => el.addEventListener("click", () => this._call("set_hvac_mode", { hvac_mode: el.dataset.mode })));
     root.querySelectorAll("[data-fan]").forEach((el) => el.addEventListener("click", () => this._call("set_fan_mode", { fan_mode: el.dataset.fan })));
@@ -378,6 +442,8 @@ class DuctedHvacCard extends HTMLElement {
 
 /* ---------- Éditeur visuel ---------- */
 const LABELS = { ...GV_LABELS,
+  freecooling_entity: "Freecooling : interrupteur (input_boolean, facultatif)", valve_open_entity: "Freecooling : vanne ouverte (fin de course)", valve_closed_entity: "Freecooling : vanne fermée (fin de course)",
+  outdoor_entity: "Freecooling : température de l'air extérieur", outdoor_name: "Freecooling : nom de la sonde", valve_timeout: "Freecooling : délai avant alerte vanne bloquée (s)",
   entity: "Climatisation (entité climate)", name: "Nom (facultatif)", info_entities: "Capteurs à afficher (soufflage, reprise, humidité...)",
   temp_step: "Pas de la consigne (0 = automatique)", theme: "Thème", show_controls: "Afficher les commandes",
   return_entity: "Caisson de reprise : température à afficher", return_name: "Caisson de reprise : nom",
@@ -415,6 +481,12 @@ class DuctedHvacCardEditor extends HTMLElement {
       { type: "grid", name: "", schema: [{ name: "return_name", selector: { text: {} } }] },
       ...[1, 2, 3, 4, 5].map((n) => ({ type: "grid", name: "", schema: [
         { name: "duct_" + n, selector: { entity: { domain: "sensor" } } }, { name: "duct_" + n + "_name", selector: { text: {} } } ] })),
+      { type: "expandable", name: "", title: "Freecooling (vanne d'air extérieur)", schema: [
+        { name: "freecooling_entity", selector: { entity: { domain: ["input_boolean", "switch"] } } },
+        { name: "valve_open_entity", selector: { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } } },
+        { name: "valve_closed_entity", selector: { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } } },
+        { name: "outdoor_entity", selector: { entity: { domain: "sensor" } } },
+        { type: "grid", name: "", schema: [{ name: "outdoor_name", selector: { text: {} } }, { name: "valve_timeout", selector: { number: { min: 10, max: 600, mode: "box" } } }] } ] },
       { name: "info_entities", selector: { entity: { multiple: true } } },
       {
         type: "grid", name: "", schema: [
@@ -438,7 +510,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "ducted-hvac-card",
   name: "Ducted HVAC Card (FR)",
-  description: "Climatisation / PAC gainable : schéma animé, température, consigne, modes, ventilation et capteurs.",
+  description: "Climatisation / PAC gainable : schéma animé, température, consigne, modes, ventilation, capteurs et freecooling (vanne d'air extérieur).",
   preview: true,
 });
 

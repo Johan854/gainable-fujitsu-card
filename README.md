@@ -58,3 +58,18 @@ Sans cette ligne, `nuance: theme` garde les couleurs d'origine de la carte.
 ## Historique des versions
 
 - **1.1.0** : nuance de couleur au choix (8 nuances, couleur personnalisée, intensité, ou nuance commune via `carte-nuance` dans le thème).
+
+## Freecooling (vanne d'air extérieur) — v1.2.0
+
+Pour un gainable équipé d'une vanne motorisée sur la reprise (aspiration d'air extérieur en été). Le bloc est facultatif : sans ces options, la carte ne change pas.
+
+```yaml
+freecooling_entity: input_boolean.freecooling      # interrupteur (facultatif, bouton Activé / Désactivé)
+valve_open_entity: binary_sensor.vanne_ouverte     # fin de course « ouverte »
+valve_closed_entity: binary_sensor.vanne_fermee    # fin de course « fermée »
+outdoor_entity: sensor.temperature_freecooling_exterieure
+outdoor_name: Extérieur
+valve_timeout: 90                                  # secondes avant l'alerte « vanne bloquée ? »
+```
+
+Le schéma affiche une prise d'air au-dessus de l'unité, la vanne (ouverte, fermée, en mouvement ou en défaut), l'air extérieur animé quand elle est ouverte, et l'écart entre la température extérieure et intérieure. Alerte si les deux fins de course sont actifs en même temps, ou si la vanne ne rejoint aucune position après `valve_timeout` secondes.
