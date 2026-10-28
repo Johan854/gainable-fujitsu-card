@@ -6,7 +6,7 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.3.0";
 
 /* === NUANCE COMMUNE v2 (cartes Johan854) ===
  * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
@@ -43,7 +43,7 @@ const DEFAULTS = {
   name: "",
   theme: "auto", nuance: "theme", intensite: 1, // auto | light | dark
   info_entities: [],
-  freecooling_entity: "", valve_open_entity: "", valve_closed_entity: "", outdoor_entity: "", outdoor_name: "Extérieur", valve_timeout: 90,
+  freecooling_entity: "", freecooling_target_entity: "", valve_open_entity: "", valve_closed_entity: "", outdoor_entity: "", outdoor_name: "Extérieur", valve_timeout: 90,
   return_entity: "",
   return_name: "Reprise",
   duct_1: "", duct_2: "", duct_3: "", duct_4: "", duct_5: "",
@@ -177,7 +177,7 @@ class DuctedHvacCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-    const ids = [this._config.entity, this._config.return_entity, this._config.freecooling_entity, this._config.valve_open_entity, this._config.valve_closed_entity, this._config.outdoor_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
+    const ids = [this._config.entity, this._config.return_entity, this._config.freecooling_entity, this._config.freecooling_target_entity, this._config.valve_open_entity, this._config.valve_closed_entity, this._config.outdoor_entity, 1, 2, 3, 4, 5].map((x) => (typeof x === "number" ? this._config["duct_" + x] : x)).concat(this._infos().map((i) => i.entity)).filter(Boolean);
     const sig = ids.map((e) => {
       const s = hass.states[e];
       return s ? s.state + "|" + JSON.stringify([s.attributes.hvac_action, s.attributes.temperature, s.attributes.current_temperature, s.attributes.fan_mode, s.attributes.preset_mode, s.attributes.humidity]) : "x";
@@ -220,7 +220,35 @@ class DuctedHvacCard extends HTMLElement {
     this._hass.callService("climate", service, { entity_id: this._config.entity, ...data });
   }
 
+  /* consigne freecooling : prise en charge quand le freecooling est activé et qu'une entité de consigne est définie */
+  _fcTarget() {
+    const c = this._config, h = this._hass;
+    if (!c.freecooling_target_entity || !c.freecooling_entity || !h) return null;
+    const fe = h.states[c.freecooling_entity], te = h.states[c.freecooling_target_entity];
+    if (!fe || fe.state !== "on" || bad(te)) return null;
+    const dom = c.freecooling_target_entity.split(".")[0];
+    return { eid: c.freecooling_target_entity, st: te, settable: dom === "input_number" || dom === "number", dom };
+  }
+
   _adjust(dir) {
+    const ft = this._fcTarget();
+    if (ft) {
+      if (!ft.settable) return;
+      const a = ft.st.attributes;
+      const c = Number(this._config.temp_step), as = Number(a.step);
+      const step = c > 0 ? c : as > 0 ? as : 0.5;
+      const min = isNum(a.min) ? Number(a.min) : 5, max = isNum(a.max) ? Number(a.max) : 35;
+      const base = this._pending !== null ? this._pending : Number(ft.st.state);
+      if (!isNum(base)) return;
+      this._pending = Math.round(Math.min(max, Math.max(min, Math.round((base + dir * step) / step) * step)) * 100) / 100;
+      this._sig = ""; this._render();
+      clearTimeout(this._timer);
+      this._timer = setTimeout(() => {
+        this._hass.callService(ft.dom, "set_value", { entity_id: ft.eid, value: this._pending });
+        setTimeout(() => { this._pending = null; this._sig = ""; this._render(); }, 4000);
+      }, 700);
+      return;
+    }
     const st = this._hass.states[this._config.entity];
     if (bad(st)) return;
     const a = st.attributes;
@@ -253,7 +281,8 @@ class DuctedHvacCard extends HTMLElement {
     const name = c.name || a.friendly_name || "Climatisation";
     const unit = this._unit();
     const cur = isNum(a.current_temperature) ? this._fmt(a.current_temperature) : "—";
-    const tgtRaw = this._pending !== null ? this._pending : a.temperature;
+    const ftg = this._fcTarget();
+    const tgtRaw = this._pending !== null ? this._pending : ftg ? ftg.st.state : a.temperature;
     const hasTarget = isNum(tgtRaw);
     const tgt = hasTarget ? this._fmt(tgtRaw) : "—";
     const label = unknown ? "Indisponible" : a.hvac_action && st.state !== "off" ? tr(ACTIONS, a.hvac_action) : tr(MODES, st.state).label || tr(ACTIONS, st.state);
@@ -417,10 +446,10 @@ class DuctedHvacCard extends HTMLElement {
           ${fcStrip}
           <div class="read">
             <div><div class="lbl">Température</div><button class="big" data-more="${esc(c.entity)}">${esc(cur)}<small>${esc(unit)}</small></button></div>
-            ${hasTarget ? `<div><div class="lbl">Consigne</div><div class="set">
-              ${c.show_controls ? `<button class="step" data-action="down" aria-label="Baisser">−</button>` : ""}
+            ${hasTarget ? `<div><div class="lbl">${ftg ? "Consigne freecooling" : "Consigne"}</div><div class="set">
+              ${c.show_controls && (!ftg || ftg.settable) ? `<button class="step" data-action="down" aria-label="Baisser">−</button>` : ""}
               <span class="val">${esc(tgt)}<small>${esc(unit)}</small></span>
-              ${c.show_controls ? `<button class="step" data-action="up" aria-label="Augmenter">+</button>` : ""}
+              ${c.show_controls && (!ftg || ftg.settable) ? `<button class="step" data-action="up" aria-label="Augmenter">+</button>` : ""}
             </div></div>` : ""}
           </div>
         </div>
@@ -444,6 +473,7 @@ class DuctedHvacCard extends HTMLElement {
 const LABELS = { ...GV_LABELS,
   freecooling_entity: "Freecooling : interrupteur (input_boolean, facultatif)", valve_open_entity: "Freecooling : vanne ouverte (fin de course)", valve_closed_entity: "Freecooling : vanne fermée (fin de course)",
   outdoor_entity: "Freecooling : température de l'air extérieur", outdoor_name: "Freecooling : nom de la sonde", valve_timeout: "Freecooling : délai avant alerte vanne bloquée (s)",
+  freecooling_target_entity: "Freecooling : consigne réglable (input_number ou number)",
   entity: "Climatisation (entité climate)", name: "Nom (facultatif)", info_entities: "Capteurs à afficher (soufflage, reprise, humidité...)",
   temp_step: "Pas de la consigne (0 = automatique)", theme: "Thème", show_controls: "Afficher les commandes",
   return_entity: "Caisson de reprise : température à afficher", return_name: "Caisson de reprise : nom",
@@ -483,6 +513,7 @@ class DuctedHvacCardEditor extends HTMLElement {
         { name: "duct_" + n, selector: { entity: { domain: "sensor" } } }, { name: "duct_" + n + "_name", selector: { text: {} } } ] })),
       { type: "expandable", name: "", title: "Freecooling (vanne d'air extérieur)", schema: [
         { name: "freecooling_entity", selector: { entity: { domain: ["input_boolean", "switch"] } } },
+        { name: "freecooling_target_entity", selector: { entity: { domain: ["input_number", "number", "sensor"] } } },
         { name: "valve_open_entity", selector: { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } } },
         { name: "valve_closed_entity", selector: { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } } },
         { name: "outdoor_entity", selector: { entity: { domain: "sensor" } } },

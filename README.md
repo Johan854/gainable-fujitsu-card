@@ -69,7 +69,10 @@ valve_open_entity: binary_sensor.vanne_ouverte     # fin de course « ouverte »
 valve_closed_entity: binary_sensor.vanne_fermee    # fin de course « fermée »
 outdoor_entity: sensor.temperature_freecooling_exterieure
 outdoor_name: Extérieur
-valve_timeout: 90                                  # secondes avant l'alerte « vanne bloquée ? »
+valve_timeout: 90                                  # secondes avant l'alerte « vanne bloquée ? » (réglable aussi dans l'éditeur)
+freecooling_target_entity: input_number.consigne_freecooling   # consigne réglable quand le freecooling est activé
 ```
 
 Le schéma affiche une prise d'air au-dessus de l'unité, la vanne (ouverte, fermée, en mouvement ou en défaut), l'air extérieur animé quand elle est ouverte, et l'écart entre la température extérieure et intérieure. Alerte si les deux fins de course sont actifs en même temps, ou si la vanne ne rejoint aucune position après `valve_timeout` secondes.
+
+**Consigne freecooling (v1.3.0)** : quand l'interrupteur `freecooling_entity` est sur `on`, le bloc « Consigne » affiche et règle `freecooling_target_entity` (un `input_number` ou un `number`, avec les boutons − / +, pas et bornes repris de l'entité). Une entité `sensor` s'affiche en lecture seule. Interrupteur sur `off` : la consigne du gainable reprend la main.
