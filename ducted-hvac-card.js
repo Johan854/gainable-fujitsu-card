@@ -1,3 +1,4 @@
+{ // bloc isolé : aucune variable ne fuit vers les autres cartes
 /*
  * Ducted HVAC Card (FR)
  * Carte Home Assistant pour climatisation / pompe à chaleur gainable (ex. Atlantic) :
@@ -5,11 +6,42 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0";
+
+/* === NUANCE COMMUNE v2 (cartes Johan854) ===
+ * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
+ * nuance "theme" (par défaut) : suit la variable carte-nuance du thème Home Assistant ;
+ * si elle n'existe pas, la carte garde ses couleurs d'origine. Intensité : 0 = neutre, 1 = normal, 2 = très coloré. */
+const GV_NUANCES = [["braise", "Braise (rouge)", "#e0524f"], ["ocean", "Océan (bleu)", "#2f8fd8"], ["lagon", "Lagon (turquoise)", "#1fb5a8"], ["foret", "Forêt (vert)", "#3fae5a"], ["lavande", "Lavande (violet)", "#8a63d8"], ["framboise", "Framboise (rose)", "#e05597"], ["ambre", "Ambre (orange)", "#e8902c"], ["ardoise", "Ardoise (neutre)", "#7d8595"]];
+const GV_DEFAULTS = { nuance: "theme", intensite: 1 };
+const gvAccent = (c) => {
+  const p = c && c.nuance_perso;
+  if (c && c.nuance === "perso") {
+    if (Array.isArray(p) && p.length === 3) return "#" + p.map((v) => Math.max(0, Math.min(255, Math.round(+v || 0))).toString(16).padStart(2, "0")).join("");
+    if (typeof p === "string" && /^#?[0-9a-f]{6}$/i.test(p.trim())) return "#" + p.trim().replace("#", "");
+  }
+  const n = GV_NUANCES.find((x) => x[0] === (c && c.nuance));
+  return n ? n[2] : "var(--carte-nuance)";
+};
+/* Variables posées sur <ha-card> : --g-bg-x (fond dégradé teinté) et --acc-ui-x (couleur d'accent).
+ * Sans nuance (thème sans carte-nuance), elles sont invalides : chaque carte retombe alors sur ses couleurs d'origine. */
+const gvStyle = (c, dark) => {
+  const i = Number(c && c.intensite), ai = Number.isFinite(i) ? Math.max(0, Math.min(2, i)) : 1;
+  const m = (pct, base) => `color-mix(in srgb,var(--acc-ui) ${+(pct * ai).toFixed(1)}%,${base})`;
+  const bg = dark ? `linear-gradient(160deg,${m(5, "#1b1e32")} 0%,${m(11, "#1f1b2c")} 55%,${m(22, "#1c1620")} 100%)`
+    : `linear-gradient(160deg,${m(2, "#f8f9fd")} 0%,${m(5, "#eef1f8")} 55%,${m(11, "#f8f8fa")} 100%)`;
+  return `--acc-ui:${gvAccent(c)};--g-bg-x:${bg};--acc-ui-x:color-mix(in srgb,var(--acc-ui) ${dark ? "80%,#fff" : "82%,#000"})`;
+};
+const GV_FIELDS = [
+  { name: "nuance", selector: { select: { mode: "dropdown", options: [{ value: "theme", label: "Selon le thème (couleurs d'origine)" }, ...GV_NUANCES.map((n) => ({ value: n[0], label: n[1] })), { value: "perso", label: "Personnalisée" }] } } },
+  { name: "nuance_perso", selector: { color_rgb: {} } },
+  { name: "intensite", selector: { number: { min: 0, max: 2, step: 0.1, mode: "slider" } } }];
+const GV_LABELS = { nuance: "Nuance de couleur", nuance_perso: "Couleur personnalisée (nuance « Personnalisée »)", intensite: "Intensité de la nuance" };
+/* === FIN NUANCE COMMUNE === */
 
 const DEFAULTS = {
   name: "",
-  theme: "auto", // auto | light | dark
+  theme: "auto", nuance: "theme", intensite: 1, // auto | light | dark
   info_entities: [],
   return_entity: "",
   return_name: "Reprise",
@@ -251,13 +283,13 @@ class DuctedHvacCard extends HTMLElement {
       <style>
         * { box-sizing: border-box; }
         ha-card.dark {
-          --hv-text:#f4f6fb; --hv-muted:#a9afc0; --hv-bg:linear-gradient(160deg,#1b1e32 0%,#241a2a 55%,#2d1519 100%);
+          --hv-text:#f4f6fb; --hv-muted:#a9afc0; --hv-bg:var(--g-bg-x,linear-gradient(160deg,#1b1e32 0%,#241a2a 55%,#2d1519 100%));
           --hv-border:rgba(255,255,255,.14); --hv-shadow:0 .6em 2em rgba(0,0,0,.35);
           --hv-glass:rgba(255,255,255,.07); --hv-glass-b:rgba(255,255,255,.13); --hv-fill:rgba(255,255,255,.09); --hv-fill-b:rgba(255,255,255,.16);
           --hv-heat:#ff8a3d; --hv-cool:#4fc3f7; --hv-auto:#9ad37f; --hv-dry:#7bd4c8; --hv-fan:#b9a7ff; --hv-off:#8a8f9c;
         }
         ha-card.light {
-          --hv-text:#1c2030; --hv-muted:#5d6477; --hv-bg:linear-gradient(160deg,#f8f9fd 0%,#eef1f8 55%,#f8eff0 100%);
+          --hv-text:#1c2030; --hv-muted:#5d6477; --hv-bg:var(--g-bg-x,linear-gradient(160deg,#f8f9fd 0%,#eef1f8 55%,#f8eff0 100%));
           --hv-border:rgba(20,24,40,.12); --hv-shadow:0 .4em 1.4em rgba(20,24,40,.12);
           --hv-glass:rgba(255,255,255,.7); --hv-glass-b:rgba(20,24,40,.1); --hv-fill:rgba(20,24,40,.06); --hv-fill-b:rgba(20,24,40,.14);
           --hv-heat:#e06a14; --hv-cool:#0f8fc4; --hv-auto:#2e9d4a; --hv-dry:#18978a; --hv-fan:#6c52d9; --hv-off:#8a8f9c;
@@ -316,7 +348,7 @@ class DuctedHvacCard extends HTMLElement {
         @media (prefers-reduced-motion: reduce) { .fan, .flow, .led { animation:none; } }
         
       </style>
-      <ha-card class="${dark ? "dark" : "light"}">
+      <ha-card class="${dark ? "dark" : "light"}" style="${gvStyle(this._config, dark)}">
         <div class="head"><b>${esc(name)}</b><span class="state ${key === "unavailable" ? "off" : key}">${esc(stateLabel)}</span></div>
         <div class="panel m-${key}">
           <div class="art">${unitSvg(running, this._uid, svgData)}</div>
@@ -345,7 +377,7 @@ class DuctedHvacCard extends HTMLElement {
 }
 
 /* ---------- Éditeur visuel ---------- */
-const LABELS = {
+const LABELS = { ...GV_LABELS,
   entity: "Climatisation (entité climate)", name: "Nom (facultatif)", info_entities: "Capteurs à afficher (soufflage, reprise, humidité...)",
   temp_step: "Pas de la consigne (0 = automatique)", theme: "Thème", show_controls: "Afficher les commandes",
   return_entity: "Caisson de reprise : température à afficher", return_name: "Caisson de reprise : nom",
@@ -388,7 +420,7 @@ class DuctedHvacCardEditor extends HTMLElement {
         type: "grid", name: "", schema: [
           { name: "temp_step", selector: { number: { min: 0, max: 5, step: 0.1, mode: "box" } } },
           { name: "theme", selector: { select: { mode: "dropdown", options: [
-            { value: "auto", label: "Automatique (thème de Home Assistant)" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" } ] } } },
+            { value: "auto", label: "Automatique (thème de Home Assistant)" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" } ] } } }, ...GV_FIELDS,
         ],
       },
       { name: "show_controls", selector: { boolean: {} } },
@@ -415,3 +447,4 @@ console.info(
   "color:#fff;background:#0f8fc4;font-weight:700;border-radius:3px 0 0 3px;padding:2px 4px",
   "color:#0f8fc4;background:#fff;font-weight:700;border-radius:0 3px 3px 0;padding:2px 4px"
 );
+}
