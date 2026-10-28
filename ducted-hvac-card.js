@@ -6,7 +6,7 @@
  * Style verre, thème clair/sombre automatique, éditeur visuel. Fonctionne avec toute entité « climate ».
  */
 
-const CARD_VERSION = "1.3.1";
+const CARD_VERSION = "1.4.0";
 
 /* === NUANCE COMMUNE v2 (cartes Johan854) ===
  * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
@@ -96,17 +96,18 @@ let UID = 0;
 
 /* Prise d'air extérieur + vanne motorisée sur la reprise (au-dessus de l'unité) */
 function fcSvg(f) {
+  const act = f.active;
   const col = f.state === "open" ? "var(--hv-out)" : f.state === "closed" ? "var(--hv-muted)" : f.state === "fault" ? "var(--hv-bad)" : f.state === "moving" ? "var(--hv-warn)" : "var(--hv-muted)";
   const blade = f.state === "open" ? `<line x1="125" y1="20" x2="125" y2="36" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>`
     : f.state === "closed" ? `<line x1="117" y1="28" x2="133" y2="28" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>`
     : `<line class="vmove" x1="125" y1="20" x2="125" y2="36" stroke="${col}" stroke-width="2.6" stroke-linecap="round" style="transform-origin:125px 28px"/>`;
   return `
-  <path d="M125 -12 V50" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>
-  ${f.state === "open" ? `<path class="flow" d="M125 -12 V50" fill="none" stroke="var(--hv-out)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3 7"/>` : ""}
-  <path d="M112 -16 H138 M114 -20 H136" stroke="var(--hv-muted)" stroke-width="1.6" stroke-linecap="round"/>
+  ${act ? `<path d="M125 -12 V50" fill="none" stroke="var(--hv-pipe)" stroke-width="8" stroke-linecap="round"/>` : ""}
+  ${act && f.state === "open" ? `<path class="flow" d="M125 -12 V50" fill="none" stroke="var(--hv-out)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3 7"/>` : ""}
+  ${act ? `<path d="M112 -16 H138 M114 -20 H136" stroke="var(--hv-muted)" stroke-width="1.6" stroke-linecap="round"/>` : ""}
   <circle cx="125" cy="28" r="9" fill="var(--hv-box)" stroke="${col}" stroke-width="1.6"/>${blade}
-  <text x="146" y="-6" class="dv" style="fill:${f.state === "open" ? "var(--hv-out)" : "var(--hv-text)"}">${esc(f.value)}</text>
-  <text x="146" y="3" class="dn">${esc(f.name)}</text>
+  ${act ? `<text x="146" y="-6" class="dv" style="fill:${f.state === "open" ? "var(--hv-out)" : "var(--hv-text)"}">${esc(f.value)}</text>
+  <text x="146" y="3" class="dn">${esc(f.name)}</text>` : ""}
   <text x="146" y="31" class="dn" style="fill:${col}">${esc(f.label)}</text>`;
 }
 
@@ -124,7 +125,7 @@ function unitSvg(running, uid, data) {
   }).join("");
   const fc = data.fc ? fcSvg(data.fc) : "";
   return `
-<svg viewBox="0 ${data.fc ? -24 : 0} 360 ${data.fc ? 174 : 150}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
+<svg viewBox="0 ${data.fc && data.fc.active ? -24 : 0} 360 ${data.fc && data.fc.active ? 174 : 150}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="sv">
   <defs><radialGradient id="hv-g-${uid}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="var(--hv-mode)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--hv-mode)" stop-opacity="0"/></radialGradient></defs>
   ${running ? `<ellipse cx="150" cy="74" rx="75" ry="55" fill="url(#hv-g-${uid})"/>` : ""}
   ${ducts}
@@ -181,7 +182,7 @@ class DuctedHvacCard extends HTMLElement {
     const sig = ids.map((e) => {
       const s = hass.states[e];
       return s ? s.state + "|" + JSON.stringify([s.attributes.hvac_action, s.attributes.temperature, s.attributes.current_temperature, s.attributes.fan_mode, s.attributes.preset_mode, s.attributes.humidity]) : "x";
-    }).join(";") + "#" + (this._isDark() ? "d" : "l") + "#" + this._pending;
+    }).join(";") + "#" + (this._isDark() ? "d" : "l") + "#" + this._pending + "#" + this._pendingFc;
     if (sig !== this._sig) {
       this._sig = sig;
       this._render();
@@ -230,24 +231,25 @@ class DuctedHvacCard extends HTMLElement {
     return { eid: c.freecooling_target_entity, st: te, settable: dom === "input_number" || dom === "number" || dom === "climate", dom, val: dom === "climate" ? te.attributes.temperature : te.state };
   }
 
-  _adjust(dir) {
-    const ft = this._fcTarget();
-    if (ft) {
+  _adjust(dir, fcMode) {
+    const ft = fcMode ? this._fcTarget() : null;
+    if (fcMode) {
+      if (!ft) return;
       if (!ft.settable) return;
       const a = ft.st.attributes;
       const cl = ft.dom === "climate", c = Number(this._config.temp_step), as = Number(cl ? a.target_temp_step : a.step);
       const step = c > 0 ? c : as > 0 ? as : 0.5;
       const lo = cl ? a.min_temp : a.min, hi = cl ? a.max_temp : a.max;
       const min = isNum(lo) ? Number(lo) : 5, max = isNum(hi) ? Number(hi) : 35;
-      const base = this._pending !== null ? this._pending : Number(ft.val);
+      const base = this._pendingFc !== null && this._pendingFc !== undefined ? this._pendingFc : Number(ft.val);
       if (!isNum(base)) return;
-      this._pending = Math.round(Math.min(max, Math.max(min, Math.round((base + dir * step) / step) * step)) * 100) / 100;
+      this._pendingFc = Math.round(Math.min(max, Math.max(min, Math.round((base + dir * step) / step) * step)) * 100) / 100;
       this._sig = ""; this._render();
-      clearTimeout(this._timer);
-      this._timer = setTimeout(() => {
-        if (ft.dom === "climate") this._hass.callService("climate", "set_temperature", { entity_id: ft.eid, temperature: this._pending });
-        else this._hass.callService(ft.dom, "set_value", { entity_id: ft.eid, value: this._pending });
-        setTimeout(() => { this._pending = null; this._sig = ""; this._render(); }, 4000);
+      clearTimeout(this._timerFc);
+      this._timerFc = setTimeout(() => {
+        if (ft.dom === "climate") this._hass.callService("climate", "set_temperature", { entity_id: ft.eid, temperature: this._pendingFc });
+        else this._hass.callService(ft.dom, "set_value", { entity_id: ft.eid, value: this._pendingFc });
+        setTimeout(() => { this._pendingFc = null; this._sig = ""; this._render(); }, 4000);
       }, 700);
       return;
     }
@@ -283,8 +285,7 @@ class DuctedHvacCard extends HTMLElement {
     const name = c.name || a.friendly_name || "Climatisation";
     const unit = this._unit();
     const cur = isNum(a.current_temperature) ? this._fmt(a.current_temperature) : "—";
-    const ftg = this._fcTarget();
-    const tgtRaw = this._pending !== null ? this._pending : ftg ? ftg.val : a.temperature;
+    const tgtRaw = this._pending !== null ? this._pending : a.temperature;
     const hasTarget = isNum(tgtRaw);
     const tgt = hasTarget ? this._fmt(tgtRaw) : "—";
     const label = unknown ? "Indisponible" : a.hvac_action && st.state !== "off" ? tr(ACTIONS, a.hvac_action) : tr(MODES, st.state).label || tr(ACTIONS, st.state);
@@ -336,10 +337,36 @@ class DuctedHvacCard extends HTMLElement {
       if (outV !== null && inV !== null) { const d = outV - inV; delta = `Extérieur ${d <= 0 ? "" : "+"}${this._fmt(d)}${unit} par rapport à l'intérieur${d < -0.5 ? " : air plus frais" : d > 0.5 ? " : air plus chaud" : ""}`; }
       const fe = c.freecooling_entity ? h.states[c.freecooling_entity] : null;
       const msg = vs === "open" ? "Freecooling actif : l'air extérieur est aspiré" : vs === "closed" ? "Vanne fermée : air intérieur recyclé" : vs === "moving" ? "La vanne se déplace…" : vs === "fault" ? "Alerte : les deux fins de course sont actifs" : vs === "stuck" ? "Alerte : la vanne ne rejoint aucune fin de course" : "Position de la vanne inconnue";
-      fcStrip = `<div class="fcs ${vs === "fault" || vs === "stuck" ? "bad" : vs === "open" ? "ok" : vs === "moving" ? "warn" : ""}"><div class="fct"><b>${esc(msg)}</b>${delta ? `<span>${esc(delta)}</span>` : ""}</div>
+      const fcOn = !!(fe && fe.state === "on"), alarm = vs === "fault" || vs === "stuck";
+      fc.active = fcOn || vs === "open" || vs === "moving" || alarm;
+      const btn = fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Activé" : "Désactivé"}</button>` : "";
+      if (!fcOn && !alarm) fcStrip = btn ? `<div class="fcs min">${btn}</div>` : "";
+      else fcStrip = `<div class="fcs ${vs === "fault" || vs === "stuck" ? "bad" : vs === "open" ? "ok" : vs === "moving" ? "warn" : ""}"><div class="fct"><b>${esc(msg)}</b>${delta ? `<span>${esc(delta)}</span>` : ""}</div>
         ${fe && !bad(fe) ? `<button class="fcb ${fe.state === "on" ? "on" : ""}" data-fc-toggle="${esc(c.freecooling_entity)}"><ha-icon icon="mdi:weather-windy"></ha-icon>${fe.state === "on" ? "Activé" : "Désactivé"}</button>` : ""}</div>`;
     }
     svgData.fc = fc;
+
+    /* second climate : visible seulement quand le freecooling est activé */
+    let fcBlock = "";
+    const ft = this._fcTarget();
+    if (ft) {
+      const fa = ft.st.attributes, cl = ft.dom === "climate";
+      const fkey = cl ? modeKey(ft.st) : "auto";
+      const fval = this._pendingFc !== null && this._pendingFc !== undefined ? this._pendingFc : ft.val;
+      const fcur = cl && isNum(fa.current_temperature) ? this._fmt(fa.current_temperature) : null;
+      const fstate = !cl ? "" : ft.st.state === "off" ? "Arrêt" : fa.hvac_action ? tr(ACTIONS, fa.hvac_action) : (MODES[ft.st.state] || {}).label || tr({}, ft.st.state);
+      const fmodes = cl && c.show_modes && Array.isArray(fa.hvac_modes) ? `<div class="modes">${fa.hvac_modes.map((m) => {
+        const mm = MODES[m] || { label: tr({}, m), icon: "mdi:thermostat" };
+        return `<button class="mode ${m === ft.st.state ? "sel" : ""} m-${mm.color || "auto"}" data-fcmode="${esc(m)}" title="${esc(mm.label)}"><ha-icon icon="${mm.icon}"></ha-icon><span>${esc(mm.label)}</span></button>`;
+      }).join("")}</div>` : "";
+      fcBlock = `<div class="panel m-${fkey === "unavailable" ? "off" : fkey}"><div class="head"><b>${esc(ft.st.attributes.friendly_name || "Freecooling")}</b>${fstate ? `<span class="state ${fkey === "unavailable" ? "off" : fkey}">${esc(fstate)}</span>` : ""}</div>
+        <div class="read">${fcur ? `<div><div class="lbl">Température</div><button class="big" data-more="${esc(ft.eid)}" style="font-size:2em">${esc(fcur)}<small>${esc(unit)}</small></button></div>` : ""}
+          ${isNum(fval) ? `<div><div class="lbl">Consigne freecooling</div><div class="set">
+            ${c.show_controls && ft.settable ? `<button class="step" data-fcaction="down" aria-label="Baisser">−</button>` : ""}
+            <span class="val">${esc(this._fmt(fval))}<small>${esc(unit)}</small></span>
+            ${c.show_controls && ft.settable ? `<button class="step" data-fcaction="up" aria-label="Augmenter">+</button>` : ""}</div></div>` : ""}</div>
+        ${c.show_controls ? fmodes : ""}</div>`;
+    }
 
     const modes = (a.hvac_modes || []).filter((m) => MODES[m] || m);
     const modeBtns = c.show_modes && !unknown ? `<div class="modes">${modes.map((m) => {
@@ -428,17 +455,19 @@ class DuctedHvacCard extends HTMLElement {
         .tl { display:flex; align-items:center; gap:.45em; font-size:.74em; color:var(--hv-muted); min-width:0; }
         .tn { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .tv { font-size:1.2em; font-weight:650; font-variant-numeric:tabular-nums; }
-        .fan { animation:hv-spin 1.2s linear infinite; } @keyframes hv-spin { to { transform:rotate(360deg); } }
+        g.fan { animation:hv-spin 1.2s linear infinite; }
+        .panel > .head { flex-direction:row; justify-content:space-between; align-items:center; } @keyframes hv-spin { to { transform:rotate(360deg); } }
         .flow { animation:hv-dash 1s linear infinite; } @keyframes hv-dash { to { stroke-dashoffset:-20; } }
         .led { animation:hv-led 1.6s ease-in-out infinite; } @keyframes hv-led { 50% { opacity:.35; } }
         .air { display:none; }
         .fcs { display:flex; align-items:center; justify-content:space-between; gap:.6em; flex-wrap:wrap; padding:.6em .8em; border-radius:1em; background:var(--hv-fill); border:1px solid var(--hv-fill-b); font-size:.8em; }
         .fct { display:flex; flex-direction:column; gap:.15em; min-width:0; } .fct span { color:var(--hv-muted); font-size:.92em; }
         .fcs.ok { border-color:var(--hv-out); } .fcs.warn { border-color:var(--hv-warn); } .fcs.bad { border-color:var(--hv-bad); background:color-mix(in srgb, var(--hv-bad) 14%, transparent); }
+        .fcs.min { background:none; border:0; padding:0; justify-content:flex-end; }
         .fcb { display:flex; align-items:center; gap:.4em; padding:.4em .85em; border-radius:2em; font-weight:600; background:var(--hv-fill); border:1px solid var(--hv-fill-b); color:var(--hv-muted); }
         .fcb.on { color:var(--hv-out); border-color:var(--hv-out); }
         .vmove { animation:hv-vm 1.2s ease-in-out infinite; } @keyframes hv-vm { 0%,100% { transform:rotate(0); } 50% { transform:rotate(60deg); } }
-        @media (prefers-reduced-motion: reduce) { .fan, .flow, .led, .vmove { animation:none; } }
+        @media (prefers-reduced-motion: reduce) { g.fan, .flow, .led, .vmove { animation:none; } }
         
       </style>
       <ha-card class="${dark ? "dark" : "light"}" style="${gvStyle(this._config, dark)}">
@@ -448,22 +477,25 @@ class DuctedHvacCard extends HTMLElement {
           ${fcStrip}
           <div class="read">
             <div><div class="lbl">Température</div><button class="big" data-more="${esc(c.entity)}">${esc(cur)}<small>${esc(unit)}</small></button></div>
-            ${hasTarget ? `<div><div class="lbl">${ftg ? "Consigne freecooling" : "Consigne"}</div><div class="set">
-              ${c.show_controls && (!ftg || ftg.settable) ? `<button class="step" data-action="down" aria-label="Baisser">−</button>` : ""}
+            ${hasTarget ? `<div><div class="lbl">Consigne</div><div class="set">
+              ${c.show_controls ? `<button class="step" data-action="down" aria-label="Baisser">−</button>` : ""}
               <span class="val">${esc(tgt)}<small>${esc(unit)}</small></span>
-              ${c.show_controls && (!ftg || ftg.settable) ? `<button class="step" data-action="up" aria-label="Augmenter">+</button>` : ""}
+              ${c.show_controls ? `<button class="step" data-action="up" aria-label="Augmenter">+</button>` : ""}
             </div></div>` : ""}
           </div>
         </div>
         ${c.show_controls ? modeBtns : ""}
         ${c.show_controls ? fans : ""}
         ${c.show_controls ? presets : ""}
+        ${fcBlock}
         ${tiles ? `<div class="tiles">${tiles}</div>` : ""}
       </ha-card>`;
 
     const root = this.shadowRoot;
     root.querySelectorAll("[data-more]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.more)));
     root.querySelectorAll("[data-fc-toggle]").forEach((el) => el.addEventListener("click", () => this._hass.callService("homeassistant", "toggle", { entity_id: el.dataset.fcToggle })));
+    root.querySelectorAll("[data-fcaction]").forEach((el) => el.addEventListener("click", () => this._adjust(el.dataset.fcaction === "up" ? 1 : -1, true)));
+    root.querySelectorAll("[data-fcmode]").forEach((el) => el.addEventListener("click", () => this._hass.callService("climate", "set_hvac_mode", { entity_id: this._config.freecooling_target_entity, hvac_mode: el.dataset.fcmode })));
     root.querySelectorAll("[data-action]").forEach((el) => el.addEventListener("click", () => this._adjust(el.dataset.action === "up" ? 1 : -1)));
     root.querySelectorAll("[data-mode]").forEach((el) => el.addEventListener("click", () => this._call("set_hvac_mode", { hvac_mode: el.dataset.mode })));
     root.querySelectorAll("[data-fan]").forEach((el) => el.addEventListener("click", () => this._call("set_fan_mode", { fan_mode: el.dataset.fan })));
